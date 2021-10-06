@@ -68,20 +68,25 @@ class TimerThread(threading.Thread):
             with self.condition:
                 self.condition.notify()
 
-
+# therefore
 # read arguments ------------------------------------------
 parser = ArgumentParser(prog="mkrd", description="""
-This program (make-ram-disk) reduces write on hard drive by mapping a directory to the RAM. The process is:
-1. make a directory at [base_mount_point]/[dir]~ 
-2. mount the created directory in RAM 
-4. use inotifywait over mounted directory
-5. filter files by regex
-6. put target file in update queue,
-7. apply updates to [dir] according to a delay time""",
+This program (make-ram-disk) reduces write on hard drive by mapping a directory to the RAM.
+It is recommended to execute this program by super user. sudo may timeout and execution will fail.
+The whole process is:
+1. make a directory at [base_mount_point]/[dir]~  
+2. mount the created directory in RAM  
+3. use inotifywait over mounted directory (you need this tool installed)  
+4. periodically sync files in ram and the target dir by determined filter""",
                         epilog="""
                         Example:
-                        React project:  
-                        ./mkrd.py ~/AProject -v --inotify-options "--exclude ./node_modules" -f '.+~\..+' --force
+                        React project: 
+                        `./mkrd.py ~/AProject -v --inotify-options "--exclude ./node_modules" -f '.+~\..+' -t 180 --force`.
+                        This command creates /tmp/AProject directory as a partition in RAM (force recreation the directory),
+                        identical to the given directory. 
+                        After that, it monitors the whole ram disk changes except '/tmp/AProject/node_modules'
+                        and files like '/tmp/AProject/*~.*' and sync the given AProject directory with this one in RAM
+                        every 3 minutes. 
                         """)
 parser.add_argument("dir", type=str, help="Target directory to be mapped on RAM")
 parser.add_argument("--mount-options", type=str, dest="m_ops", default='',
@@ -91,7 +96,7 @@ parser.add_argument("--inotify-options", type=str, dest="i_ops", default='',
 parser.add_argument("-f", "--filter", type=str, dest="filter", default='',
                     help="Limit files which trigger the processor by a regex string")
 parser.add_argument("-t", "--time", type=float, dest="time", default=60,
-                    help="Continuously update actual files by delay (seconds)")
+                    help="Continuously update actual files by delay (seconds) [default 60 seconds]")
 parser.add_argument("-v", "--verbose", dest="verbose", action='store_true', help="verbosity status")
 parser.add_argument("--force", dest="force", help="force to mount dir", action="store_true")
 parser.add_argument("--close", dest="close", help="finish the process", action="store_true")
@@ -245,6 +250,7 @@ def start_monitoring():
     cmd = "inotifywait -e modify -e attrib -e moved_to -e moved_from -e create -e delete --format '%w%f' --monitor --recursive "
     cmd += '{} {}'.format(mount_point, args.i_ops)
     run_cmd_alive(cmd, file_change_listener)
+    print("ready ----------------------")
 
 
 def get_smallest_common_path_between_2(min_path, path):
@@ -299,6 +305,7 @@ bg_process = None
 projectName = ''
 mount_point = ''
 item_repository = Repository()
+timer_worker = TimerThread('timer worker')
 timer_worker = TimerThread('timer worker')
 initialize()
 
