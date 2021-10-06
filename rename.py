@@ -6,17 +6,17 @@ import re
 from os.path import isdir, isfile
 
 parser = ArgumentParser(
-    description='Rename files matching given regex. Let\'s say you want to rename all files containing \'abc\' at the first of their name with \'def\'. Then you can use the following command: rename -e \'^abc\' -r \'def\'')
+    description='Rename all files matching the given regex. Let\'s say you want to replace all files containing \'abc\' at the first of their name with \'def\'. Then you can use the following command: rename -e \'^abc\' -r \'def\'')
 parser.add_argument('adr', nargs='?', metavar='Address', type=str, help='Target address. In other words: Where?',
                     default='./')
 parser.add_argument('-e', '--exp', required=True, type=str,
-                    help='Python selection regex to select desired files.')
+                    help='[Expression]. Python selection regex to select desired files.')
 parser.add_argument('-r', '--replace', type=str, required=True,
                     help='Replace the matched part of the name with this statement. Place \'\' to remove selected part.')
 parser.add_argument('-R', '--recursive', action='count', help='Do it recursively.')
 parser.add_argument('-d', action='count',
-                    help='-d forces operation only on directories and -dd operate on files either directories.')
-parser.add_argument('-s', '--show', action='count', help='Do not alert file system.')
+                    help='if you are willing to rename only directories, then pass in -d and if you desire to rename files either, pass in -dd.')
+parser.add_argument('-s', '--show', action='count', help='just show the files which are going to be changed and do not write any thing on disk.')
 parser.add_argument('-v', '--verbose', action='count', help='Enable verbosity.')
 
 args = parser.parse_args()
