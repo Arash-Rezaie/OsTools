@@ -2,7 +2,7 @@
 Some tools for linux OS. Each one is documented. To reach the document use "-h".
 
 ## rename.py
-A simple tools to do batch rename over directoreis and files by regex
+A simple tool to do batch rename over directoreis and files by regex
 
 ---
 
