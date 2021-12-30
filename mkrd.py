@@ -52,13 +52,12 @@ class TimerThread(threading.Thread):
             while not self.interrupted:
                 with self.condition:
                     self.condition.wait(timeout=args.time)
-                process_item_repository()
+                    process_item_repository()
         except:
             print("timer faced an exception")
-            pass
+            process_item_repository()
         finally:
             self.is_working = False
-            release_resources()
 
     def interrupt(self):
         if self.is_working:
@@ -67,6 +66,7 @@ class TimerThread(threading.Thread):
             self.interrupted = True
             with self.condition:
                 self.condition.notify()
+
 
 # therefore
 # read arguments ------------------------------------------
@@ -98,7 +98,11 @@ parser.add_argument("-f", "--filter", type=str, dest="filter", default='',
 parser.add_argument("-t", "--time", type=float, dest="time", default=60,
                     help="Continuously update actual files by delay (seconds) [default 60 seconds]")
 parser.add_argument("-v", "--verbose", dest="verbose", action='store_true', help="verbosity status")
-parser.add_argument("--force", dest="force", help="force to mount dir", action="store_true")
+parser.add_argument("--force", dest="force",
+                    help="when mount point exists already, this option tries to remove the mount point at first and "
+                         "if it fails because of being busy or any thing else, hiring the current mount point will be "
+                         "the way. so --mount-options will be ignored",
+                    action="store_true")
 parser.add_argument("--close", dest="close", help="finish the process", action="store_true")
 parser.add_argument("--no-clean", dest="no_clean", help="do not clean copied files to the mount point",
                     action="store_true")
@@ -106,14 +110,26 @@ args = parser.parse_args()
 
 
 # methods -------------------------------------------------
-def exit_abnormal(msg):
-    print("\nERROR: " + msg + '\n-----------------')
+def convert_to_str(obj):
+    obj_type = type(obj)
+    if obj_type == str:
+        return obj
+    elif obj_type == bytes:
+        return obj.decode().strip("'\n ")
+    elif obj_type == Exception:
+        return str(obj)
+    else:
+        raise Exception('could not convert {} to string'.format(obj_type))
+
+
+def exit_abnormal(exp):
+    print('\nERROR>\n{}\n-----------------'.format(exp))
     exit(1)
 
 
 def check_dest_existence(path):
     if not os.path.exists(path):
-        exit_abnormal("\"{}\" not found".format(path))
+        raise Exception("\"{}\" not found".format(path))
 
 
 def get_absolute_path(adr):
@@ -128,15 +144,11 @@ def check_arguments():
         args.dir += '/'
 
     if args.time < 0:
-        exit_abnormal("ERROR: time can not be negative")
-
-
-def get_byte_as_str(byte_array):
-    return byte_array.decode().strip("'\n ")
+        raise Exception("time can not be negative")
 
 
 def report_cmd_output(output):
-    s = get_byte_as_str(output)
+    s = convert_to_str(output)
     if len(s) == 0:
         s = 'SUCCESSFUL'
     print(' -> ' + s)
@@ -153,10 +165,7 @@ def run_cmd(command):
     except:
         error = str(sys.exc_info())
     if error:
-        if type(error) == 'str':
-            exit_abnormal(' -> ' + error)
-        else:
-            exit_abnormal(' -> ' + get_byte_as_str(error))
+        raise Exception(convert_to_str(error))
     if args.verbose:
         report_cmd_output(output)
     return output
@@ -170,14 +179,14 @@ def run_cmd_alive(command, consumer):
             print(' > ' + command)
         bg_process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
         while True:
-            output = get_byte_as_str(bg_process.stdout.readline())
+            output = convert_to_str(bg_process.stdout.readline())
             if len(output) > 0:
                 consumer(output)
             elif bg_process.poll() is not None:
                 break
     except:
         if args.verbose:
-            print(' -> ' + str(sys.exc_info()))
+            print(' -> ' + convert_to_str(sys.exc_info()))
     finally:
         bg_process.poll()
         finish_process()
@@ -189,29 +198,37 @@ def release_resources():
         print("releasing resources")
     is_mounted = "is not" not in str(run_cmd("mountpoint {}".format(mount_point)))
     if is_mounted:
-        output = get_byte_as_str(run_cmd("sudo umount " + mount_point))
+        output = convert_to_str(run_cmd("sudo umount " + mount_point))
     if len(output) == 0 and not args.no_clean:
-        output = get_byte_as_str(run_cmd("sudo rm --recursive --force {}".format(mount_point)))
+        output = convert_to_str(run_cmd("sudo rm --recursive --force {}".format(mount_point)))
     if len(output) > 0:
-        exit_abnormal("operation failed due to " + output)
+        raise Exception(output)
 
 
 def finish_process():
     global bg_process
     global timer_worker
+
     if bg_process is not None:
-        print('kill inotifywait processor')
+        if args.verbose:
+            print('kill inotifywait processor')
         bg_process.kill()
         bg_process = None
     if timer_worker.is_working:
+        if args.verbose:
+            print('stop worker')
         timer_worker.interrupt()
-    else:
+        timer_worker.join()
+    try:
         release_resources()
+    except Exception as e:
+        exit_abnormal('operation failed due to: "{}"'.format(e))
+    else:
+        exit(0)
 
 
 def create_mount_point():
-    if not os.path.exists(mount_point):
-        os.mkdir(mount_point)
+    os.mkdir(mount_point)
     mount_options = ""
     if args.m_ops != '':
         mount_options = "--options " + args.m_ops
@@ -221,16 +238,29 @@ def create_mount_point():
 
 
 def handle_mount_point():
-    if os.path.exists(mount_point):
-        if not args.close and not args.force:
-            exit_abnormal(
-                "directory \"{}\" is mounted at \"{}\" already. umount it and clear its mount point or use options --force or --close".format(
-                    projectName, mount_point))
-        finish_process()
     if args.close:
-        exit(0)
+        finish_process()
+        print('this message must not show up')
+
+    if os.path.exists(mount_point):
+        print('directory "{}" is already mounted at "{}"'.format(projectName, mount_point))
+        if args.force:
+            try:
+                release_resources()
+                create_mount_point()
+            except Exception as e:
+                if args.verbose:
+                    print(
+                        '\nrecreating mount point failed due to: "{}" so mount options will be ignored\nreusing "{}"...'.format(
+                            e, mount_point))
+        else:
+            print('please use --close or --force options')
+            exit(0)
     else:
-        create_mount_point()
+        try:
+            create_mount_point()
+        except Exception as e:
+            raise Exception('creating mount point failed due to: "{}"'.format(e))
 
 
 def copy_files():
@@ -285,7 +315,7 @@ def process_item_repository():
         run_cmd(cmd)
     else:
         if args.verbose:
-            print('no data to sync')
+            print('nothing found to sync')
 
 
 def initialize():
@@ -296,20 +326,22 @@ def initialize():
     mount_point = '/tmp/' + projectName
 
 
-# body ----------------------------------------------------
-# check user inputs
-check_arguments()
+try:
+    # body ----------------------------------------------------
+    # check user inputs
+    check_arguments()
 
-# init data
-bg_process = None
-projectName = ''
-mount_point = ''
-item_repository = Repository()
-timer_worker = TimerThread('timer worker')
-timer_worker = TimerThread('timer worker')
-initialize()
+    # init data
+    bg_process = None
+    projectName = ''
+    mount_point = ''
+    item_repository = Repository()
+    timer_worker = TimerThread('timer worker')
+    initialize()
 
-handle_mount_point()
-copy_files()
-timer_worker.start()
-start_monitoring()
+    handle_mount_point()
+    copy_files()
+    timer_worker.start()
+    start_monitoring()
+except Exception as e:
+    finish_process()
