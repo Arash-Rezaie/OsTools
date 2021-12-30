@@ -326,19 +326,23 @@ def initialize():
     mount_point = '/tmp/' + projectName
 
 
+# body ----------------------------------------------------
+# check user inputs
 try:
-    # body ----------------------------------------------------
-    # check user inputs
     check_arguments()
+except Exception as e:
+    exit_abnormal(e)
 
-    # init data
-    bg_process = None
-    projectName = ''
-    mount_point = ''
-    item_repository = Repository()
-    timer_worker = TimerThread('timer worker')
-    initialize()
+# init data
+bg_process = None
+projectName = ''
+mount_point = ''
+item_repository = Repository()
+timer_worker = TimerThread('timer worker')
+initialize()
 
+# start
+try:
     handle_mount_point()
     copy_files()
     timer_worker.start()
