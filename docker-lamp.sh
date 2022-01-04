@@ -1,11 +1,13 @@
 #!/bin/bash
-#!! do not use ' Up ' in your strings
+#******************************************
+#!! do not use word ' Up ' in your strings
+#******************************************
 
-httpdVolume="/tmp/docker-volumes/php/"
+httpdVolume="/home/arash/Applications/project/php/"
 httpdPort=80
 httpdContainerName='apache-php'
 phpVersion="7.4-apache"
-mysqlVolume="/tmp/docker-volumes/mysql/"
+mysqlVolume="/home/arash/Applications/project/mysql/"
 mysqlPort=3306
 mysqlContainerName='mysql'
 mysqlRootPass="123"
@@ -120,6 +122,14 @@ setVariable () {
 	esac
 }
 
+configureApacheServer () {
+	#enable rewrite module. This is useful when you use .htaccess
+	docker exec $httpdContainerName a2enmod rewrite
+
+	#restart apache server to load modules
+	docker run --hostname myapp.mydomain.com php:$phpVersion apache2ctl restart
+}
+
 cmd=''
 force=''
 total=$#
@@ -159,6 +169,9 @@ if [[ $cmd == 'install' ]]; then
 	
 	#run httpd under name of php for simplicity
 	runDockerImage $httpdContainerName "-d -p $httpdPort:80 --volume=$httpdVolume:/var/www/html php:$phpVersion" $force
+
+	#alter apache configuration
+	configureApacheServer
 	
 	#install mysql image
 	installDockerImage "mysql/mysql-server:$mysqlVersion"
