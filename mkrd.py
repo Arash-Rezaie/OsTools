@@ -1,9 +1,13 @@
-#!/usr/bin/python
+#!/usr/bin/python3
+
 import os
 import re
+import signal
 import subprocess
 import sys
+import termios
 import threading
+import tty
 from argparse import ArgumentParser
 
 
@@ -72,7 +76,7 @@ class TimerThread(threading.Thread):
 # read arguments ------------------------------------------
 parser = ArgumentParser(prog="mkrd", description="""
 This program (make-ram-disk) reduces write on hard drive by mapping a directory to the RAM.
-It is recommended to execute this program by super user. sudo may timeout and execution will fail.
+This script must get executed by super user as sudo affects only for a while but you need to run this script for long time.
 The whole process is:
 1. make a directory at [base_mount_point]/[dir]~  
 2. mount the created directory in RAM  
@@ -136,6 +140,12 @@ def get_absolute_path(adr):
     return os.path.abspath(adr)
 
 
+def check_user():
+    output = convert_to_str(run_cmd("id -u"))
+    if output != '0':
+        raise Exception("Switch to root user, then execute this command")
+
+
 def check_arguments():
     args.dir = get_absolute_path(args.dir)
     check_dest_existence(args.dir)
@@ -173,23 +183,28 @@ def run_cmd(command):
 
 def run_cmd_alive(command, consumer):
     global bg_process
-    try:
-        command = command
-        if args.verbose:
-            print(' > ' + command)
-        bg_process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
-        while True:
-            output = convert_to_str(bg_process.stdout.readline())
-            if len(output) > 0:
-                consumer(output)
-            elif bg_process.poll() is not None:
-                break
-    except:
-        if args.verbose:
-            print(' -> ' + convert_to_str(sys.exc_info()))
-    finally:
-        bg_process.poll()
-        finish_process()
+    global is_proc_broken
+
+    while not is_proc_broken:
+        try:
+            command = command
+            if args.verbose:
+                print(' > ' + command)
+            bg_process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
+            while True:
+                output = convert_to_str(bg_process.stdout.readline())
+                if len(output) > 0:
+                    consumer(output)
+                elif bg_process.poll() is not None:
+                    break
+        except:
+            is_proc_broken = True
+            if args.verbose:
+                print(' -> ' + convert_to_str(sys.exc_info()))
+        finally:
+            if is_proc_broken:
+                bg_process.poll()
+                finish_process()
 
 
 def release_resources():
@@ -198,9 +213,9 @@ def release_resources():
         print("releasing resources")
     is_mounted = "is not" not in str(run_cmd("mountpoint {}".format(mount_point)))
     if is_mounted:
-        output = convert_to_str(run_cmd("sudo umount " + mount_point))
+        output = convert_to_str(run_cmd("umount " + mount_point))
     if len(output) == 0 and not args.no_clean:
-        output = convert_to_str(run_cmd("sudo rm --recursive --force {}".format(mount_point)))
+        output = convert_to_str(run_cmd("rm --recursive --force {}".format(mount_point)))
     if len(output) > 0:
         raise Exception(output)
 
@@ -221,8 +236,8 @@ def finish_process():
         timer_worker.join()
     try:
         release_resources()
-    except Exception as e:
-        exit_abnormal('operation failed due to: "{}"'.format(e))
+    except Exception as e1:
+        exit_abnormal('operation failed due to: "{}"'.format(e1))
     else:
         exit(0)
 
@@ -232,7 +247,7 @@ def create_mount_point():
     mount_options = ""
     if args.m_ops != '':
         mount_options = "--options " + args.m_ops
-    cmd = "sudo mount --types tmpfs {} {} {}".format(projectName, mount_point, mount_options)
+    cmd = "mount --types tmpfs {} {} {}".format(projectName, mount_point, mount_options)
     run_cmd(cmd)
     print("directory \"{}\" mounted at \"{}\"".format(args.dir, mount_point))
 
@@ -248,24 +263,24 @@ def handle_mount_point():
             try:
                 release_resources()
                 create_mount_point()
-            except Exception as e:
+            except Exception as e1:
                 if args.verbose:
                     print(
                         '\nrecreating mount point failed due to: "{}" so mount options will be ignored\nreusing "{}"...'.format(
-                            e, mount_point))
+                            e1, mount_point))
         else:
             print('please use --close or --force options')
             exit(0)
     else:
         try:
             create_mount_point()
-        except Exception as e:
-            raise Exception('creating mount point failed due to: "{}"'.format(e))
+        except Exception as e1:
+            raise Exception('creating mount point failed due to: "{}"'.format(e1))
 
 
 def copy_files():
     print("please wait to copy the target dir to the mount point...")
-    cmd = "sudo rsync --recursive --links --chmod=o+w --perms {} {}".format(args.dir, mount_point)
+    cmd = "rsync --recursive --links --chmod=o+w --perms {} {}".format(args.dir, mount_point)
     run_cmd(cmd)
 
 
@@ -289,14 +304,14 @@ def get_smallest_common_path_between_2(min_path, path):
     return min_path
 
 
-def get_smallest_common_path(lst, l):
-    if l == 1:
+def get_smallest_common_path(lst, l1):
+    if l1 == 1:
         return lst[0]
     else:
         lst.sort(key=len)
         smallest_path = lst[0]
         i = 0
-        while i < l and smallest_path != '/':
+        while i < l1 and smallest_path != '/':
             smallest_path = get_smallest_common_path_between_2(smallest_path, lst[i])
             i += 1
         return smallest_path
@@ -304,9 +319,9 @@ def get_smallest_common_path(lst, l):
 
 def process_item_repository():
     lst = item_repository.get_sorted_list()
-    l = len(lst)
-    if l > 0:
-        scp = get_smallest_common_path(lst, l)
+    l1 = len(lst)
+    if l1 > 0:
+        scp = get_smallest_common_path(lst, l1)
         rest_dir = scp[len(mount_point) + 1:]
         target_dir = args.dir + rest_dir
         if args.verbose:
@@ -321,14 +336,38 @@ def process_item_repository():
 def initialize():
     global projectName
     global mount_point
-    parentDir = args.dir[:args.dir.rfind('/', 0, -1) + 1]
-    projectName = args.dir[len(parentDir):-1]
+    parent_dir = args.dir[:args.dir.rfind('/', 0, -1) + 1]
+    projectName = args.dir[len(parent_dir):-1]
     mount_point = '/tmp/' + projectName
+
+
+def read_key_pressed():
+    file_descriptors = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin)
+    x = sys.stdin.read(1)[0]
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, file_descriptors)
+    return x
+
+
+def handle_signal(sig_num, frame):
+    global is_proc_broken
+
+    print("\nPress S to sync or Any key to quit (s|*)", end="? ", flush=True)
+    answer = read_key_pressed()
+    print("")
+    if answer == 's' or answer == 'S':
+        print('start syncing...')
+        process_item_repository()
+        print('syncing finished')
+    else:
+        is_proc_broken = True
+        raise Exception("break")
 
 
 # body ----------------------------------------------------
 # check user inputs
 try:
+    check_user()
     check_arguments()
 except Exception as e:
     exit_abnormal(e)
@@ -337,15 +376,15 @@ except Exception as e:
 bg_process = None
 projectName = ''
 mount_point = ''
+is_proc_broken = False
 item_repository = Repository()
 timer_worker = TimerThread('timer worker')
 initialize()
-
-# start
 try:
     handle_mount_point()
     copy_files()
     timer_worker.start()
+    signal.signal(signal.SIGINT, handle_signal)
     start_monitoring()
 except Exception as e:
     finish_process()
