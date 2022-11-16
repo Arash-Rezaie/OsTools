@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+#Please notice that inotifywait and rsync must be installed
+
 import os
 import re
 import signal
