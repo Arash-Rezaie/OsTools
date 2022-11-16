@@ -94,8 +94,7 @@ The whole process is:
                         `mkrd.py ProjectPath --verbose --inotify-options "--exclude ./node_modules" --filter '.+~\..+' --time 180 --force`.
                         This command creates /tmp/ProjectName directory as a partition in RAM (force recreation the directory),
                         After that, it monitors the whole ram disk changes except '/tmp/ProjectName/node_modules' and
-                        files like '/tmp/ProjectName/*~.*'.
-                        Finally,  /tmp/ProjectName and the given project directory will be synced every 3 minutes.
+                        files like '/tmp/ProjectName/*~.*'.Finally,  /tmp/ProjectName and the given project directory will be synced every 3 minutes.
                         """)
 
 parser.add_argument("dir", type=str, help="Target directory to be mapped on RAM")
