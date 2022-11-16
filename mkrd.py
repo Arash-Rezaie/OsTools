@@ -1,6 +1,10 @@
 #!/usr/bin/python3
 
-#Please notice that inotifywait and rsync must be installed
+# Please notice that inotifywait and rsync must be installed
+# sample:
+# sudo su ↲
+# mkrd.py Project-Dir --verbose --inotify-options "--exclude ./node_modules" --filter '.+~\..+' --interval 180 --force ↲
+#
 
 import os
 import re
@@ -57,7 +61,7 @@ class TimerThread(threading.Thread):
                 print('start timer')
             while not self.interrupted:
                 with self.condition:
-                    self.condition.wait(timeout=args.time)
+                    self.condition.wait(timeout=args.interval)
                     process_item_repository()
         except:
             print("timer faced an exception")
@@ -78,40 +82,49 @@ class TimerThread(threading.Thread):
 # read arguments ------------------------------------------
 parser = ArgumentParser(prog="mkrd", description="""
 This program (make-ram-disk) reduces write on hard drive by mapping a directory to the RAM.
-This script must get executed by super user as sudo affects only for a while but you need to run this script for long time.
+This script must get executed by super user. It is not recomended to sun by sudo because sudo affects only for a limitted time while you ususally need to run this script for long time.
 The whole process is:
-1. make a directory at [base_mount_point]/[dir]~  
-2. mount the created directory in RAM  
-3. use inotifywait over mounted directory (you need this tool installed)  
-4. periodically sync files in ram and the target dir by determined filter""",
+1. make directory /tmp/ProjectName
+2. mount the created directory in RAM
+3. use inotifywait over mounted directory (you need this tool installed)
+4. periodically sync files in ram and the target dir which are not filtered""",
                         epilog="""
                         Example:
-                        React project: 
-                        `./mkrd.py ~/AProject -v --inotify-options "--exclude ./node_modules" -f '.+~\..+' -t 180 --force`.
-                        This command creates /tmp/AProject directory as a partition in RAM (force recreation the directory),
-                        identical to the given directory. 
-                        After that, it monitors the whole ram disk changes except '/tmp/AProject/node_modules'
-                        and files like '/tmp/AProject/*~.*' and sync the given AProject directory with this one in RAM
-                        every 3 minutes. 
+                        React project:
+                        `mkrd.py ProjectPath --verbose --inotify-options "--exclude ./node_modules" --filter '.+~\..+' --time 180 --force`.
+                        This command creates /tmp/ProjectName directory as a partition in RAM (force recreation the directory),
+                        After that, it monitors the whole ram disk changes except '/tmp/ProjectName/node_modules' and
+                        files like '/tmp/ProjectName/*~.*'.
+                        Finally,  /tmp/ProjectName and the given project directory will be synced every 3 minutes.
                         """)
+
 parser.add_argument("dir", type=str, help="Target directory to be mapped on RAM")
+
 parser.add_argument("--mount-options", type=str, dest="m_ops", default='',
                     help="options of tmpfs. you may need some customization over mounting")
+
 parser.add_argument("--inotify-options", type=str, dest="i_ops", default='',
                     help="options of inotifywait. checkout its manual for more information")
+
 parser.add_argument("-f", "--filter", type=str, dest="filter", default='',
                     help="Limit files which trigger the processor by a regex string")
-parser.add_argument("-t", "--time", type=float, dest="time", default=60,
+
+parser.add_argument("-i", "--interval", type=float, dest="interval", default=60,
                     help="Continuously update actual files by delay (seconds) [default 60 seconds]")
+
 parser.add_argument("-v", "--verbose", dest="verbose", action='store_true', help="verbosity status")
+
 parser.add_argument("--force", dest="force",
                     help="when mount point exists already, this option tries to remove the mount point at first and "
                          "if it fails because of being busy or any thing else, hiring the current mount point will be "
                          "the way. so --mount-options will be ignored",
                     action="store_true")
+
 parser.add_argument("--close", dest="close", help="finish the process", action="store_true")
+
 parser.add_argument("--no-clean", dest="no_clean", help="do not clean copied files to the mount point",
                     action="store_true")
+
 args = parser.parse_args()
 
 
@@ -155,8 +168,8 @@ def check_arguments():
     if not args.dir.endswith('/'):
         args.dir += '/'
 
-    if args.time < 0:
-        raise Exception("time can not be negative")
+    if args.interval < 0:
+        raise Exception("interval can not be negative")
 
 
 def report_cmd_output(output):
